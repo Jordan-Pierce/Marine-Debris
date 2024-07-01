@@ -1,0 +1,12 @@
+wheel
+torchgeo
+numpy
+pandas
+scikit-image
+scikit-learn
+scipy
+matplotlib
+opencv-python
+opencv-contrib-python
+panoptes-client
+tqdm
