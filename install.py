@@ -9,8 +9,8 @@ import subprocess
 # ----------------------------------------------
 osused = platform.system()
 
-if osused not in ['Windows', 'Linux']:
-    raise Exception("This install script is only for Windows or Linux")
+if osused not in ['Windows', 'Linux', 'Darwin']:
+    raise Exception("This install script is only for Windows, Linux, or macOS")
 
 # ----------------------------------------------
 # Conda
@@ -44,14 +44,12 @@ if not os.path.isfile(requirements_file):
     sys.exit(1)
 
 # ---------------------------------------------
-# MSVC for Windows
+# MSVC for Windows (skipped for macOS)
 # ---------------------------------------------
 if osused == 'Windows':
-
     try:
         print(f"NOTE: Installing msvc-runtime")
         subprocess.check_call([sys.executable, "-m", "pip", "install", 'msvc-runtime'])
-
     except Exception as e:
         print(f"There was an issue installing msvc-runtime\n{e}")
         sys.exit(1)
@@ -60,6 +58,9 @@ if osused == 'Windows':
 # CUDA Toolkit version
 # ----------------------------------------------
 try:
+    if osused == 'Darwin':
+        raise Exception("CUDA Toolkit is not supported on macOS.")
+
     # Command for installing cuda nvcc
     conda_command = [conda_exe, "install", "-c", f"nvidia/label/cuda-11.8.0", "cuda-nvcc", "-y"]
 
@@ -75,23 +76,29 @@ try:
     subprocess.run(conda_command, check=True)
 
 except Exception as e:
-    print("ERROR: Could not install CUDA Toolkit")
-    sys.exit(1)
+    if osused != 'Darwin':
+        print("ERROR: Could not install CUDA Toolkit")
+        sys.exit(1)
+    else:
+        print("Skipping CUDA Toolkit installation on macOS")
 
 # ----------------------------------------------
 # Pytorch
 # ----------------------------------------------
 try:
-
-    torch_package = 'torch==2.0.0+cu118'
-    torchvision_package = 'torchvision==0.15.1+cu118'
+    torch_package = 'torch==2.0.0'
+    torchvision_package = 'torchvision==0.15.1'
     torch_extra_argument1 = '--extra-index-url'
     torch_extra_argument2 = 'https://download.pytorch.org/whl/cu118'
 
-    # Setting Torch, Torchvision versions
-    list_args = [sys.executable, "-m", "pip", "install", torch_package, torchvision_package]
-    if torch_extra_argument1 != "":
-        list_args.extend([torch_extra_argument1, torch_extra_argument2])
+    if osused != 'Darwin':
+        # Setting Torch, Torchvision versions for CUDA
+        torch_package += '+cu118'
+        torchvision_package += '+cu118'
+        list_args = [sys.executable, "-m", "pip", "install", torch_package, torchvision_package, torch_extra_argument1, torch_extra_argument2]
+    else:
+        # Setting Torch, Torchvision versions for CPU
+        list_args = [sys.executable, "-m", "pip", "install", torch_package, torchvision_package]
 
     # Installing Torch, Torchvision
     print("NOTE: Installing Torch 2.0.0")

@@ -10,3 +10,6 @@ opencv-python
 opencv-contrib-python
 panoptes-client
 tqdm
+rasterio
+pystac
+planetary_computer
