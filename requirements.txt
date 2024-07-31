@@ -1,5 +1,4 @@
 wheel
-torchgeo
 numpy
 pandas
 scikit-image
