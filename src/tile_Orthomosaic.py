@@ -187,11 +187,13 @@ class OrthomosaicTiler:
         with open(f"{tile_path}.prj", 'w') as f:
             f.write(crs_wkt)
 
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------------------------------------------------
 
 def main():
+
     parser = argparse.ArgumentParser(description='Tile a large orthomosaic GeoTIFF file.')
 
     parser.add_argument('--input_path', type=str, required=True,
