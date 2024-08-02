@@ -84,7 +84,7 @@ class OrthomosaicTiler:
                 return
 
             # Create a tile name
-            tile_name = f"{self.input_name}_{i}_{j}_{self.tile_size}"
+            tile_name = f"{self.input_name}---{i}_{j}_{self.tile_size}"
             tile_path = f"{self.output_dir}/{tile_name}"
 
             # Save the tile
@@ -140,12 +140,14 @@ class OrthomosaicTiler:
 
     def save_as_geotiff(self, tile, tile_path, profile, transform):
         """
-        Save the tile as a GeoTIFF file.
+        Save the tile as a lossless GeoTIFF file.
         """
         profile.update({
             'height': tile.shape[1],
             'width': tile.shape[2],
-            'transform': transform
+            'transform': transform,
+            'compress': 'lzw',  # Use LZW compression (lossless)
+            'predictor': 2,  # Horizontal differencing (improves compression)
         })
 
         with rasterio.open(f"{tile_path}.tif", 'w', **profile) as dst:
@@ -153,7 +155,7 @@ class OrthomosaicTiler:
 
     def save_as_jpeg(self, tile, tile_path, transform, crs_wkt):
         """
-        Save the tile as a JPEG file with sidecar files for georeferencing.
+        Save the tile as a high-quality JPEG file with sidecar files for georeferencing.
         """
         # Convert the tile to uint8 format for JPEG
         tile = np.moveaxis(tile, 0, -1)  # Move channels to last dimension
@@ -163,9 +165,9 @@ class OrthomosaicTiler:
         if tile.shape[2] == 4:
             tile = tile[:, :, :3]
 
-        # Save the JPEG file
+        # Save the JPEG file with highest quality
         image = Image.fromarray(tile)
-        image.save(f"{tile_path}.jpg", "JPEG")
+        image.save(f"{tile_path}.jpg", "JPEG", quality=95, optimize=True)
 
         # Save the sidecar files for georeferencing
         self.save_sidecar_files(tile_path, transform, crs_wkt)
@@ -206,7 +208,7 @@ def main():
     parser.add_argument('--tile_size', type=int, default=2048,
                         help='Size of each tile in pixels (default: 2048)')
 
-    parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg'], default='geotiff',
+    parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg'], default='jpeg',
                         help='Output format of the tiles (default: geotiff)')
 
     parser.add_argument('--csv_path', type=str, default=None,

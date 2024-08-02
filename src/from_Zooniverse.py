@@ -326,11 +326,11 @@ def main():
     parser = argparse.ArgumentParser(description="Convert Zooniverse Annotations.")
 
     parser.add_argument("--workflow_id", type=int,
-                        default=None,
+                        default=27107,
                         help="Workflow ID.")
 
     parser.add_argument("--version", type=float,
-                        default=None,
+                        default=22.19,
                         help="Version.")
 
     parser.add_argument("--input_csv", type=str,

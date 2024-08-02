@@ -1,9 +1,10 @@
 import os
 import glob
-import pandas as pd
-import cv2
+import argparse
 from tqdm import tqdm
 import panoptes_client
+
+import pandas as pd
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -55,20 +56,20 @@ class ZooniverseUploader:
 
         :return:
         """
-        paths = glob.glob(os.path.join(self.input_dir, "*.{tif,jpg,png}"))
+        tile_paths = glob.glob(f"{self.input_dir}/*.jpg")
         data = []
 
-        for path in paths:
-            tile_name = os.path.basename(path)
-            tile_id = "_".join(tile_name.split("_")[0:2])
-            image_name = path.split("_")[3]
-            month = path.split("_")[4]
-            height, width = cv2.imread(path).shape[0:2]
+        for tile_path in tile_paths:
+            mosaic_name = os.path.basename(tile_path).split("---")[0]
+            tile_name = os.path.basename(tile_path)
+            tile_id = tile_name.split("---")[-1].split(".")[0]
 
-            data.append([month, tile_id, tile_name, path, image_name, height, width])
+            data.append([mosaic_name, tile_name, tile_id, tile_path])
 
-        self.dataframe = pd.DataFrame(data, columns=['Month', 'Image ID', 'Image Name', 'Tile ID',
-                                                     'Tile Name', 'Path', 'Height', 'Width'])
+        self.dataframe = pd.DataFrame(data, columns=['Mosaic Name',
+                                                     'Tile Name',
+                                                     'Tile ID',
+                                                     'Path'])
 
     def upload_to_zooniverse(self):
         """
@@ -79,9 +80,9 @@ class ZooniverseUploader:
             return
 
         try:
-            subject_set = self.client.SubjectSet()
+            subject_set = panoptes_client.SubjectSet()
             subject_set.links.project = self.project
-            subject_set.display_name = str(self.dataframe['Month'].iloc[0])
+            subject_set.display_name = str(self.dataframe['Mosaic Name'].iloc[0])
             subject_set.save()
 
             self.project.reload()
@@ -93,7 +94,7 @@ class ZooniverseUploader:
             subject_ids = []
 
             for filename, metadata in tqdm(subject_meta.items()):
-                subject = self.client.Subject()
+                subject = panoptes_client.Subject()
                 subject.links.project = self.project
                 subject.add_location(filename)
                 subject.metadata.update(metadata)
@@ -168,7 +169,7 @@ def main():
                         default=os.getenv('ZOONIVERSE_PASSWORD'),
                         help="Zooniverse password")
 
-    parser.add_argument("--zoon_project_id", type=int,
+    parser.add_argument("--zoon_project_id", type=int, default=24346,
                         help="Zooniverse project ID")
 
     parser.add_argument("--input_dir", type=str,
