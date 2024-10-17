@@ -56,7 +56,7 @@ class ZooniverseUploader:
 
         :return:
         """
-        tile_paths = glob.glob(f"{self.input_dir}/*.jpg")
+        tile_paths = glob.glob(f"{self.input_dir}/*.jpeg")[0:20]
         data = []
 
         for tile_path in tile_paths:
@@ -169,7 +169,7 @@ def main():
                         default=os.getenv('ZOONIVERSE_PASSWORD'),
                         help="Zooniverse password")
 
-    parser.add_argument("--zoon_project_id", type=int, default=24346,
+    parser.add_argument("--zoon_project_id", type=int, default=24250,
                         help="Zooniverse project ID")
 
     parser.add_argument("--input_dir", type=str,
