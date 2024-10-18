@@ -316,7 +316,7 @@ def main():
                         default=f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}/Data",
                         help='Directory to save the output tiles')
 
-    parser.add_argument('--tile_size', type=int, default=2048,
+    parser.add_argument('--tile_size', type=int, default=1024,
                         help='Size of each tile in pixels (default: 2048)')
 
     parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg'], default='jpeg',
