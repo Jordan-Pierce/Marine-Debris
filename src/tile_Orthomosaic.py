@@ -38,14 +38,16 @@ class OrthomosaicTiler:
         self.csv_path = csv_path
         self.csv_epsg = csv_epsg
         self.points = []
+        self.output_csv = []
 
         # Ensure output directory exists
-        self.output_dir = os.path.join(output_dir, f"{self.input_name}/with")
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.output_dir = f"{output_dir}/{self.input_name}"
+        self.with_dir = os.path.join(output_dir, f"{self.input_name}/with")
+        self.without_dir = os.path.join(output_dir, f"{self.input_name}/without")
+        os.makedirs(self.with_dir, exist_ok=True)
+        os.makedirs(self.without_dir, exist_ok=True)
 
-        if csv_path:
-            self.read_csv()
-
+        self.read_csv()
         self.define_crs(self.input_path, SRC_CRS_WKT)
 
     def define_crs(self, tile_path, crs):
@@ -54,6 +56,10 @@ class OrthomosaicTiler:
         arcpy.DefineProjection_management(tile_path, spatial_ref)
 
     def read_csv(self):
+        if not os.path.exists(self.csv_path):
+            print(f"Warning: CSV file not found at {self.csv_path}. Skipping transformation.")
+            return
+
         # Create CRS objects directly from WKT and EPSG code
         dst_crs = CRS.from_wkt(SRC_CRS_WKT)
         src_crs = CRS.from_epsg(4326)  # WGS84
@@ -83,7 +89,10 @@ class OrthomosaicTiler:
         df = df.iloc[:len(valid_points)]  # Ensure the DataFrame length matches the number of valid points
         df['X'] = [point[0] for point in self.points]
         df['Y'] = [point[1] for point in self.points]
-        df.to_csv(self.csv_path.replace(file_ext, "_projected.csv"), index=False)
+
+        output_file = os.path.basename(self.csv_path).replace(file_ext, "_projected.csv")
+        output_path = f"{self.output_dir}/{output_file}"
+        df.to_csv(output_path, index=False)
 
         print(f"Transformed {len(self.points)} points successfully.")
 
@@ -159,7 +168,7 @@ class OrthomosaicTiler:
 
         # Create a tile name
         tile_name = f"{self.input_name}---{i}_{j}_{window[2]}_{window[3]}"
-        tile_path = f"{self.output_dir}/{tile_name}"
+        tile_path = f"{self.with_dir}/{tile_name}"
 
         # Save the tile
         self.save_tile(tile, tile_path, transform, crs_wkt)
@@ -234,19 +243,15 @@ class OrthomosaicTiler:
                 src_ds.FlushCache()
                 src_ds = None
 
-                # Create the "without" folder if it doesn't exist
-                without_folder = os.path.join(os.path.dirname(self.output_dir), "without")
-                os.makedirs(without_folder, exist_ok=True)
-
                 if self.output_format == 'jpeg':
-                    shutil.move(tile_path + ".jgw", without_folder)
-                    shutil.move(tile_path + ".jpeg", without_folder)
-                    shutil.move(tile_path + ".jpeg.aux.xml", without_folder)
-                    shutil.move(tile_path + ".jpeg.xml", without_folder)
-                    shutil.move(tile_path + ".prj", without_folder)
+                    shutil.move(tile_path + ".jgw", self.without_dir)
+                    shutil.move(tile_path + ".jpeg", self.without_dir)
+                    shutil.move(tile_path + ".jpeg.aux.xml", self.without_dir)
+                    shutil.move(tile_path + ".jpeg.xml", self.without_dir)
+                    shutil.move(tile_path + ".prj", self.without_dir)
                 else:
-                    shutil.move(tile_path + ".tif", without_folder)
-                    shutil.move(tile_path + ".tif.aux.xml", without_folder)
+                    shutil.move(tile_path + ".tif", self.without_dir)
+                    shutil.move(tile_path + ".tif.aux.xml", self.without_dir)
 
         except Exception as e:
             print(f"Could not save / move tile {os.path.basename(tile_path)}.\n{e}")

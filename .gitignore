@@ -1,2 +1,7 @@
 .idea
-Data
+*.jgw
+*.jpeg.*
+*.prj
+*.tif
+*.tiff.*
+*.xml

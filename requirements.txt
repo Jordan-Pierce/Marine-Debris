@@ -7,7 +7,7 @@ scipy
 matplotlib
 opencv-python
 opencv-contrib-python
-panoptes-client
+panoptes-client>=1.6.2
 tqdm
-rasterio
+rasterio>=1.4.1
 pyproj
