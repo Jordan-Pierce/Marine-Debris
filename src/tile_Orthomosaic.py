@@ -6,16 +6,13 @@ from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import pandas as pd
-from PIL import Image
+from PIL import Image, ImageDraw
 
 import arcpy
 from osgeo import gdal
 from pyproj import CRS, Transformer
 
-
-# ----------------------------------------------------------------------------------------------------------------------
 # Constants
-# ----------------------------------------------------------------------------------------------------------------------
 SRC_CRS_WKT = """PROJCS["NAD_1983_2011_StatePlane_Mississippi_East_FIPS_2301_Ft_US",GEOGCS["GCS_NAD_1983_2011",
 DATUM["NAD_1983_2011",SPHEROID["GRS_1980",6378137.0,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG",
 "1116"]],PRIMEM["Greenwich",0.0,AUTHORITY["EPSG","8901"]],UNIT["Degree",0.0174532925199433,AUTHORITY["EPSG","9102"]],
@@ -25,28 +22,27 @@ AUTHORITY["EPSG","6318"]],PROJECTION["Transverse_Mercator",AUTHORITY["Esri","430
 "100003"]],PARAMETER["Latitude_Of_Origin",29.5,AUTHORITY["Esri","100021"]],UNIT["Foot_US",0.3048006096012192,
 AUTHORITY["EPSG","9003"]],AUTHORITY["EPSG","6507"]]"""
 
-# ----------------------------------------------------------------------------------------------------------------------
-# Classes
-# ----------------------------------------------------------------------------------------------------------------------
-
-
 class OrthomosaicTiler:
-    def __init__(self, input_path, output_dir, tile_size, output_format, csv_path=None, csv_epsg=None):
+    def __init__(self, input_path, output_dir, tile_size, output_format, red_dot, csv_path=None, csv_epsg=None):
         self.input_path = input_path
         self.input_name = os.path.basename(input_path).split(".")[0]
         self.tile_size = tile_size
         self.output_format = output_format.lower()
+        self.red_dot = red_dot
         self.csv_path = csv_path
         self.csv_epsg = csv_epsg
         self.points = []
         self.output_csv = []
 
         # Ensure output directory exists
-        self.output_dir = f"{output_dir}/{self.input_name}"
-        self.with_dir = os.path.join(output_dir, f"{self.input_name}/with")
-        self.without_dir = os.path.join(output_dir, f"{self.input_name}/without")
+        self.output_dir = f"{output_dir}/{self.input_name}/data"
+        self.with_dir = os.path.join(self.output_dir, f"with")
+        self.without_dir = os.path.join(self.output_dir, f"without")
+        self.red_dot_dir = os.path.join(self.output_dir, f"red_dot")
+
         os.makedirs(self.with_dir, exist_ok=True)
         os.makedirs(self.without_dir, exist_ok=True)
+        os.makedirs(self.red_dot_dir, exist_ok=True)
 
         self.read_csv()
         self.define_crs(self.input_path, SRC_CRS_WKT)
@@ -70,6 +66,7 @@ class OrthomosaicTiler:
 
         # Determine file extension and read accordingly
         file_ext = os.path.splitext(self.csv_path)[1].lower()
+
         if file_ext == '.csv':
             df = pd.read_csv(self.csv_path, header=0)
         elif file_ext in ['.xls', '.xlsx']:
@@ -77,19 +74,22 @@ class OrthomosaicTiler:
         else:
             raise ValueError("Unsupported file format. Please provide a CSV or Excel file.")
 
+        df.columns = ['Type of debris', 'Date', 'Latitude', 'Longitude']
+
         valid_points = []
         for _, row in df.iterrows():
             try:
-                lon, lat = row['Lon'], row['Lat']
-                x, y = transformer.transform(float(lon), float(lat))
-                valid_points.append((x, y))
+                # Convert coordinates to easting and northing
+                lon, lat = float(row['Longitude']), float(row['Latitude'])
+                easting, northing = transformer.transform(lon, lat)
+                valid_points.append((easting, northing))
             except Exception as e:
                 print(f"Warning: Could not convert coordinates for row {_}.\n{e}")
 
         self.points = valid_points
         df = df.iloc[:len(valid_points)]  # Ensure the DataFrame length matches the number of valid points
-        df['X'] = [point[0] for point in self.points]
-        df['Y'] = [point[1] for point in self.points]
+        df['Easting'] = [point[0] for point in self.points]
+        df['Northing'] = [point[1] for point in self.points]
 
         output_file = os.path.basename(self.csv_path).replace(file_ext, "_projected.csv")
         output_path = f"{self.output_dir}/{output_file}"
@@ -98,9 +98,6 @@ class OrthomosaicTiler:
         print(f"Transformed {len(self.points)} points successfully.")
 
     def get_tile_transform(self, transform, x_offset, y_offset):
-        """
-        Calculate the geotransform for the tile.
-        """
         return (
             transform[0] + x_offset * transform[1],  # Top-left x
             transform[1],  # W-E pixel resolution
@@ -111,9 +108,6 @@ class OrthomosaicTiler:
         )
 
     def tile(self, use_multiprocessing=True):
-        """
-        Tile the orthomosaic GeoTIFF file into smaller tiles.
-        """
         src_ds = gdal.Open(self.input_path)
         width = src_ds.RasterXSize
         height = src_ds.RasterYSize
@@ -127,10 +121,6 @@ class OrthomosaicTiler:
             self.tile_single_process(width, height, nodata, crs_wkt, transform)
 
     def tile_multiprocessing(self, width, height, nodata, crs_wkt, transform):
-        """
-        Tile the orthomosaic using multiprocessing.
-        """
-        # Prepare arguments for multiprocessing
         args = []
         for i in range(0, width, self.tile_size):
             for j in range(0, height, self.tile_size):
@@ -140,14 +130,10 @@ class OrthomosaicTiler:
                 tile_transform = self.get_tile_transform(transform, i, j)
                 args.append((i, j, window, tile_transform, nodata, crs_wkt))
 
-        # Use multiprocessing to process tiles in parallel
-        with Pool(cpu_count() // 2) as pool:
+        with Pool(cpu_count() // 4) as pool:
             pool.starmap(self.process_tile, args)
 
     def tile_single_process(self, width, height, nodata, crs_wkt, transform):
-        """
-        Tile the orthomosaic using a single process.
-        """
         for i in range(0, width, self.tile_size):
             for j in range(0, height, self.tile_size):
                 tile_width = min(self.tile_size, width - i)
@@ -157,75 +143,104 @@ class OrthomosaicTiler:
                 self.process_tile(i, j, window, tile_transform, nodata, crs_wkt)
 
     def process_tile(self, i, j, window, transform, nodata, crs_wkt):
-        """
-        Process a single tile.
-        """
         src_ds = gdal.Open(self.input_path)
         tile = src_ds.ReadAsArray(window[0], window[1], window[2], window[3])
 
-        # Check if the tile contains valid data
         if self.is_invalid_tile(tile, nodata):
             return
 
-        # Create a tile name
         tile_name = f"{self.input_name}---{i}_{j}_{window[2]}_{window[3]}"
         tile_path = f"{self.with_dir}/{tile_name}"
 
-        # Save the tile
-        self.save_tile(tile, tile_path, transform, crs_wkt)
+        contains_point = self.tile_contains_point(transform, window)
+
+        self.save_tile(tile, tile_path, transform, crs_wkt, contains_point)
+
+        if contains_point and self.red_dot:
+            points = self.get_tile_points(transform, window)
+            red_dot_tile = self.superimpose_red_dots(tile, points)
+            red_dot_tile_path = f"{self.red_dot_dir}/{tile_name}"
+            self.save_tile(red_dot_tile, red_dot_tile_path, transform, crs_wkt, contains_point, is_red_dot=True)
 
     def is_invalid_tile(self, tile, nodata):
-        """
-        Check if the tile is invalid (contains more than half NaN, black, white, or nodata values).
-        """
-
         if tile is None:
             return True
 
         total_pixels = tile.size
-
-        # Count NaN values
         nan_count = np.isnan(tile).sum()
-
-        # Count black pixels (0)
         black_count = np.sum(tile == 0)
-
-        # Count white pixels (255)
         white_count = np.sum(tile == 255)
-
-        # Count nodata pixels
         nodata_count = 0
         if nodata is not None:
             nodata_count = np.sum(tile == nodata)
 
-        # Check if more than half of the pixels are NaN, black, white, or nodata
         invalid_pixel_count = nan_count + black_count + white_count + nodata_count
         if invalid_pixel_count > total_pixels / 2:
             return True
 
         return False
 
-    def save_sidecar_files(self, tile_path, transform, crs_wkt):
-        """
-        Save the sidecar files for georeferencing.
-        """
-        # Save the .jgw file
-        with open(f"{tile_path}.jgw", 'w') as f:
-            f.write(f"{transform[1]}\n")  # Pixel size in the x-direction
-            f.write("0\n")  # Rotation term (typically 0)
-            f.write("0\n")  # Rotation term (typically 0)
-            f.write(f"{transform[5]}\n")  # Pixel size in the y-direction (negative)
-            f.write(f"{transform[0]}\n")  # X-coordinate of the center of the upper left pixel
-            f.write(f"{transform[3]}\n")  # Y-coordinate of the center of the upper left pixel
+    def tile_contains_point(self, transform, window):
+        minx = transform[0]
+        miny = transform[3]
+        maxx = minx + window[2] * transform[1]
+        maxy = miny + window[3] * transform[5]
 
-        # Save the .prj file
+        for x, y in self.points:
+            if minx <= x < maxx and miny >= y > maxy:
+                return True
+        return False
+
+    def get_tile_points(self, transform, window):
+        minx = transform[0]
+        miny = transform[3]
+        maxx = minx + window[2] * transform[1]
+        maxy = miny + window[3] * transform[5]
+
+        points_in_tile = []
+        for x, y in self.points:
+            if minx <= x < maxx and miny >= y > maxy:
+                # Convert coordinates to pixel values
+                pixel_x = int((x - minx) / transform[1])
+                pixel_y = int((y - miny) / transform[5])
+                points_in_tile.append((pixel_x, pixel_y))
+
+        return np.array(points_in_tile)
+
+    def superimpose_red_dots(self, tile, points):
+        tile = np.moveaxis(tile, 0, -1)
+        tile = np.clip(tile, 0, 255).astype(np.uint8)
+
+        if tile.shape[2] == 4:
+            tile = tile[:, :, :3]
+
+        image = Image.fromarray(tile)
+        draw = ImageDraw.Draw(image)
+        dot_size = 2
+
+        for x, y in points:
+            draw.ellipse((x - dot_size,
+                          y - dot_size,
+                          x + dot_size,
+                          y + dot_size), fill='red')
+
+        tile = np.moveaxis(np.array(image), -1, 0)
+
+        return tile
+
+    def save_sidecar_files(self, tile_path, transform, crs_wkt):
+        with open(f"{tile_path}.jgw", 'w') as f:
+            f.write(f"{transform[1]}\n")
+            f.write("0\n")
+            f.write("0\n")
+            f.write(f"{transform[5]}\n")
+            f.write(f"{transform[0]}\n")
+            f.write(f"{transform[3]}\n")
+
         with open(f"{tile_path}.prj", 'w') as f:
             f.write(crs_wkt)
 
-    def save_tile(self, tile, tile_path, transform, crs_wkt):
-        """
-        Save the tile to a file.
-        """
+    def save_tile(self, tile, tile_path, transform, crs_wkt, contains_point, is_red_dot=False):
         try:
             if self.output_format == 'jpeg':
                 self.save_as_jpeg(tile, tile_path, transform, crs_wkt)
@@ -234,13 +249,8 @@ class OrthomosaicTiler:
                 self.save_as_geotiff(tile, tile_path, transform, crs_wkt)
                 self.define_crs(f"{tile_path}.tif", SRC_CRS_WKT)
 
-            # If tile doesn't contain any points, move it and its sidecar files to the "without" folder
-            src_ds = gdal.Open(tile_path + f".{self.output_format}")
-            transform = src_ds.GetGeoTransform()
-            raster_x, raster_y = src_ds.RasterXSize, src_ds.RasterYSize
-            contains_point = self.tile_contains_point(transform, (0, 0, raster_x, raster_y))
-            if not contains_point:
-
+            if not contains_point and not is_red_dot:
+                src_ds = gdal.Open(tile_path + f".{self.output_format}")
                 src_ds.FlushCache()
                 src_ds = None
 
@@ -255,12 +265,9 @@ class OrthomosaicTiler:
                     shutil.move(tile_path + ".tif.aux.xml", self.without_dir)
 
         except Exception as e:
-            print(f"Could not save / move tile {os.path.basename(tile_path)}.\n{e}")
+            print(f"Could not save / move tile {os.path.basename(tile_path)}\n{e}")
 
     def save_as_geotiff(self, tile, tile_path, transform, crs_wkt):
-        """
-        Save the tile as a lossless GeoTIFF file.
-        """
         driver = gdal.GetDriverByName('GTiff')
         dst_ds = driver.Create(f"{tile_path}.tif", tile.shape[2], tile.shape[1], tile.shape[0], gdal.GDT_Float32)
         dst_ds.SetGeoTransform(transform)
@@ -273,46 +280,19 @@ class OrthomosaicTiler:
         dst_ds.FlushCache()
         dst_ds = None
 
-    def tile_contains_point(self, transform, window):
-        """
-        Check if the tile contains at least one point from the CSV file.
-        """
-        minx = transform[0]
-        miny = transform[3]
-        maxx = minx + window[2] * transform[1]
-        maxy = miny + window[3] * transform[5]
-
-        for x, y in self.points:
-            if minx <= x < maxx and miny >= y > maxy:
-                return True
-        return False
-
     def save_as_jpeg(self, tile, tile_path, transform, crs_wkt):
-        """
-        Save the tile as a high-quality JPEG file with sidecar files for georeferencing.
-        """
-        # Convert the tile to uint8 format for JPEG
-        tile = np.moveaxis(tile, 0, -1)  # Move channels to last dimension
+        tile = np.moveaxis(tile, 0, -1)
         tile = np.clip(tile, 0, 255).astype(np.uint8)
 
-        # If the tile has an alpha channel, remove it
         if tile.shape[2] == 4:
             tile = tile[:, :, :3]
 
-        # Save the JPEG file with highest quality
         image = Image.fromarray(tile)
         image.save(f"{tile_path}.jpeg", "JPEG", quality=95, optimize=True)
 
-        # Save the sidecar files for georeferencing
         self.save_sidecar_files(tile_path, transform, crs_wkt)
 
-
-# ----------------------------------------------------------------------------------------------------------------------
-# Main
-# ----------------------------------------------------------------------------------------------------------------------
-
 def main():
-
     parser = argparse.ArgumentParser(description='Tile a large orthomosaic GeoTIFF file.')
 
     parser.add_argument('--input_path', type=str, required=True,
@@ -327,6 +307,9 @@ def main():
 
     parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg'], default='jpeg',
                         help='Output format of the tiles (default: geotiff)')
+
+    parser.add_argument("--red_dot", action="store_true",
+                        help="Superimpose a red dot on tiles containing points of interest")
 
     parser.add_argument('--csv_path', type=str, default=None,
                         help='Path to the CSV file containing points of interest')
@@ -344,6 +327,7 @@ def main():
                                  output_dir=args.output_dir,
                                  tile_size=args.tile_size,
                                  output_format=args.output_format,
+                                 red_dot=args.red_dot,
                                  csv_path=args.csv_path,
                                  csv_epsg=args.csv_epsg)
 
@@ -354,7 +338,6 @@ def main():
     except Exception as e:
         print(traceback.format_exc())
         print(f"ERROR: Could not tile orthomosaic.\n{e}")
-
 
 if __name__ == "__main__":
     main()

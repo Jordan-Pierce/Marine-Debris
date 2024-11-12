@@ -9,5 +9,4 @@ opencv-python
 opencv-contrib-python
 panoptes-client>=1.6.2
 tqdm
-rasterio>=1.4.1
 pyproj
