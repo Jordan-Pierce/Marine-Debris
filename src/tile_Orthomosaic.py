@@ -245,6 +245,9 @@ class OrthomosaicTiler:
             if self.output_format == 'jpeg':
                 self.save_as_jpeg(tile, tile_path, transform, crs_wkt)
                 self.define_crs(f"{tile_path}.jpeg", SRC_CRS_WKT)
+            elif self.output_format == 'png':
+                self.save_as_png(tile, tile_path, transform, crs_wkt)
+                self.define_crs(f"{tile_path}.png", SRC_CRS_WKT)
             else:
                 self.save_as_geotiff(tile, tile_path, transform, crs_wkt)
                 self.define_crs(f"{tile_path}.tif", SRC_CRS_WKT)
@@ -259,6 +262,12 @@ class OrthomosaicTiler:
                     shutil.move(tile_path + ".jpeg", self.without_dir)
                     shutil.move(tile_path + ".jpeg.aux.xml", self.without_dir)
                     shutil.move(tile_path + ".jpeg.xml", self.without_dir)
+                    shutil.move(tile_path + ".prj", self.without_dir)
+                elif self.output_format == 'png':
+                    shutil.move(tile_path + ".pgw", self.without_dir)
+                    shutil.move(tile_path + ".png", self.without_dir)
+                    shutil.move(tile_path + ".png.aux.xml", self.without_dir)
+                    shutil.move(tile_path + ".png.xml", self.without_dir)
                     shutil.move(tile_path + ".prj", self.without_dir)
                 else:
                     shutil.move(tile_path + ".tif", self.without_dir)
@@ -292,6 +301,89 @@ class OrthomosaicTiler:
 
         self.save_sidecar_files(tile_path, transform, crs_wkt)
 
+    def save_as_png(self, tile, tile_path, transform, crs_wkt):
+        """Save the tile as a PNG file using GDAL, preserving data type."""
+        try:
+            png_driver = gdal.GetDriverByName('PNG')
+            mem_driver = gdal.GetDriverByName('MEM')
+            if png_driver is None:
+                raise Exception("PNG driver not available in GDAL.")
+            if mem_driver is None:
+                raise Exception("MEM driver not available in GDAL.")
+
+            # Determine GDAL data type from numpy array
+            dtype = tile.dtype
+            if dtype == np.uint8:
+                gdal_dtype = gdal.GDT_Byte
+            elif dtype == np.uint16:
+                gdal_dtype = gdal.GDT_UInt16
+            # Floating point data will likely be scaled/converted by the driver.
+            elif np.issubdtype(dtype, np.floating):
+                # Basic scaling for float -> uint8 for standard PNG compatibility
+                print(f"Warning: Converting floating point data to Byte for PNG {os.path.basename(tile_path)}")
+                min_val, max_val = np.nanmin(tile), np.nanmax(tile)
+                if max_val > min_val:
+                    tile = ((tile - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                else:
+                    tile = np.zeros(tile.shape, dtype=np.uint8) # Handle flat data
+                gdal_dtype = gdal.GDT_Byte
+            else:
+                # Default or fallback: Convert to Byte for standard PNG compatibility
+                print(f"Warning: Unsupported data type {dtype} for PNG {os.path.basename(tile_path)}")
+                tile = np.clip(tile, 0, 255).astype(np.uint8) # Example clip and cast
+                gdal_dtype = gdal.GDT_Byte
+
+            n_bands = tile.shape[0]
+            height = tile.shape[1]
+            width = tile.shape[2]
+
+            # Create an in-memory dataset
+            mem_ds = mem_driver.Create('', width, height, n_bands, gdal_dtype)
+            if mem_ds is None:
+                raise Exception("Failed to create in-memory dataset.")
+
+            mem_ds.SetGeoTransform(transform)
+            mem_ds.SetProjection(crs_wkt)
+
+            # Write band data to the in-memory dataset
+            for band_idx in range(n_bands):
+                band = mem_ds.GetRasterBand(band_idx + 1)
+                band.WriteArray(tile[band_idx])
+
+            # Use CreateCopy to save the in-memory dataset as PNG
+            png_file_path = f"{tile_path}.png"
+            dst_ds = png_driver.CreateCopy(png_file_path, mem_ds, strict=0) # strict=0 allows for some flexibility
+
+            if dst_ds is None:
+                raise Exception(f"Failed to create PNG file using CreateCopy: {png_file_path}")
+
+            # Flush cache and close datasets
+            dst_ds.FlushCache()
+            dst_ds = None
+            mem_ds = None  # Close the memory dataset
+
+            # Create world file (.pgw)
+            pgw_file_path = f"{tile_path}.pgw"
+            with open(pgw_file_path, 'w') as f:
+                f.write(f"{transform[1]}\n")  # Pixel X size
+                f.write(f"{transform[4]}\n")  # Rotation Y (usually 0)
+                f.write(f"{transform[2]}\n")  # Rotation X (usually 0)
+                f.write(f"{transform[5]}\n")  # Pixel Y size (negative)
+                f.write(f"{transform[0]}\n")  # Top-left X coordinate
+                f.write(f"{transform[3]}\n")  # Top-left Y coordinate
+
+            # Create projection file (.prj)
+            prj_file_path = f"{tile_path}.prj"
+            with open(prj_file_path, 'w') as f:
+                f.write(crs_wkt)
+
+        except Exception as e:
+            print(f"ERROR saving tile {os.path.basename(tile_path)} as PNG using GDAL: {e}")
+            print(traceback.format_exc())
+            # Decide if error should halt execution
+            raise
+
+
 def main():
     parser = argparse.ArgumentParser(description='Tile a large orthomosaic GeoTIFF file.')
 
@@ -302,10 +394,10 @@ def main():
                         default=f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}/Data",
                         help='Directory to save the output tiles')
 
-    parser.add_argument('--tile_size', type=int, default=1024,
+    parser.add_argument('--tile_size', type=int, default=2048,
                         help='Size of each tile in pixels (default: 2048)')
 
-    parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg'], default='jpeg',
+    parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg', 'png'], default='png',
                         help='Output format of the tiles (default: geotiff)')
 
     parser.add_argument("--red_dot", action="store_true",
@@ -338,6 +430,7 @@ def main():
     except Exception as e:
         print(traceback.format_exc())
         print(f"ERROR: Could not tile orthomosaic.\n{e}")
+
 
 if __name__ == "__main__":
     main()
