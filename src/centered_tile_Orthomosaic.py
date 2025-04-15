@@ -2,7 +2,6 @@ import os
 import shutil
 import argparse
 import traceback
-from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import pandas as pd
@@ -387,7 +386,7 @@ def main():
                         default=f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}/Data",
                         help='Directory to save the output tiles')
 
-    parser.add_argument('--tile_size', type=int, default=2048,
+    parser.add_argument('--tile_size', type=int, default=1024,
                         help='Size of each tile in pixels (default: 2048)')
 
     parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg', 'png'], default='png',
@@ -402,9 +401,6 @@ def main():
     parser.add_argument('--csv_epsg', type=int, default=4326,
                         help='EPSG code for the coordinate system of the CSV file (default: 4326 for WGS84)')
 
-    parser.add_argument('--single_process', action='store_true',
-                        help='Use single-process method instead of multiprocessing')
-
     args = parser.parse_args()
 
     try:
@@ -416,7 +412,7 @@ def main():
                                  csv_path=args.csv_path,
                                  csv_epsg=args.csv_epsg)
 
-        tiler.tile(use_multiprocessing=not args.single_process)
+        tiler.tile()
 
         print("Done.")
 
