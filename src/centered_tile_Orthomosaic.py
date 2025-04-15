@@ -22,12 +22,12 @@ AUTHORITY["EPSG","6318"]],PROJECTION["Transverse_Mercator",AUTHORITY["Esri","430
 AUTHORITY["EPSG","9003"]],AUTHORITY["EPSG","6507"]]"""
 
 class OrthomosaicTiler:
-    def __init__(self, input_path, output_dir, tile_size, output_format, red_dot, csv_path=None, csv_epsg=None):
+    def __init__(self, input_path, output_dir, tile_size, output_format, red_arrow, csv_path=None, csv_epsg=None):
         self.input_path = input_path
         self.input_name = os.path.basename(input_path).split(".")[0]
         self.tile_size = tile_size
         self.output_format = output_format.lower()
-        self.red_dot = red_dot
+        self.red_arrow = red_arrow
         self.csv_path = csv_path
         self.csv_epsg = csv_epsg
         self.points = []
@@ -37,11 +37,11 @@ class OrthomosaicTiler:
         self.output_dir = f"{output_dir}/{self.input_name}/data"
         self.with_dir = os.path.join(self.output_dir, f"with")
         self.without_dir = os.path.join(self.output_dir, f"without")
-        self.red_dot_dir = os.path.join(self.output_dir, f"red_dot")
+        self.red_arrow_dir = os.path.join(self.output_dir, f"red_arrow")
 
         os.makedirs(self.with_dir, exist_ok=True)
         os.makedirs(self.without_dir, exist_ok=True)
-        os.makedirs(self.red_dot_dir, exist_ok=True)
+        os.makedirs(self.red_arrow_dir, exist_ok=True)
 
         self.read_csv()
         self.define_crs(self.input_path, SRC_CRS_WKT)
@@ -148,11 +148,11 @@ class OrthomosaicTiler:
         contains_point = True  # Always true since the tile is centered on a point
         self.save_tile(tile, tile_path, transform, crs_wkt, contains_point)
 
-        if contains_point and self.red_dot:
+        if contains_point and self.red_arrow:
             points = self.get_tile_points(transform, window)
-            red_dot_tile = self.superimpose_red_dots(tile, points)
-            red_dot_tile_path = f"{self.red_dot_dir}/{tile_name}"
-            self.save_tile(red_dot_tile, red_dot_tile_path, transform, crs_wkt, contains_point, is_red_dot=True)
+            red_arrow_tile = self.superimpose_red_arrows(tile, points)
+            red_arrow_tile_path = f"{self.red_arrow_dir}/{tile_name}"
+            self.save_tile(red_arrow_tile, red_arrow_tile_path, transform, crs_wkt, contains_point, is_red_arrow=True)
 
     def is_invalid_tile(self, tile, nodata):
         if tile is None:
@@ -199,7 +199,7 @@ class OrthomosaicTiler:
 
         return np.array(points_in_tile)
 
-    def superimpose_red_dots(self, tile, points):
+    def superimpose_red_arrows(self, tile, points):
         tile = np.moveaxis(tile, 0, -1)
         tile = np.clip(tile, 0, 255).astype(np.uint8)
 
@@ -208,13 +208,14 @@ class OrthomosaicTiler:
 
         image = Image.fromarray(tile)
         draw = ImageDraw.Draw(image)
-        dot_size = 2
+        arrow_size = 100
 
         for x, y in points:
-            draw.ellipse((x - dot_size,
-                          y - dot_size,
-                          x + dot_size,
-                          y + dot_size), fill='red')
+            # Draw a downward-facing arrow
+            draw.line([(x, y - arrow_size), (x, y)], fill='red', width=3)  # Arrow shaft
+            draw.polygon([(x - 5, y - arrow_size + 10), 
+                          (x + 5, y - arrow_size + 10), 
+                          (x, y - arrow_size)], fill='red')   # Arrowhead
 
         tile = np.moveaxis(np.array(image), -1, 0)
 
@@ -232,7 +233,7 @@ class OrthomosaicTiler:
         with open(f"{tile_path}.prj", 'w') as f:
             f.write(crs_wkt)
 
-    def save_tile(self, tile, tile_path, transform, crs_wkt, contains_point, is_red_dot=False):
+    def save_tile(self, tile, tile_path, transform, crs_wkt, contains_point, is_red_arrow=False):
         try:
             if self.output_format == 'jpeg':
                 self.save_as_jpeg(tile, tile_path, transform, crs_wkt)
@@ -244,7 +245,7 @@ class OrthomosaicTiler:
                 self.save_as_geotiff(tile, tile_path, transform, crs_wkt)
                 self.define_crs(f"{tile_path}.tif", SRC_CRS_WKT)
 
-            if not contains_point and not is_red_dot:
+            if not contains_point and not is_red_arrow:
                 src_ds = gdal.Open(tile_path + f".{self.output_format}")
                 src_ds.FlushCache()
                 src_ds = None
@@ -317,12 +318,12 @@ class OrthomosaicTiler:
                 if max_val > min_val:
                     tile = ((tile - min_val) / (max_val - min_val) * 255).astype(np.uint8)
                 else:
-                    tile = np.zeros(tile.shape, dtype=np.uint8) # Handle flat data
+                    tile = np.zeros(tile.shape, dtype=np.uint8)  # Handle flat data
                 gdal_dtype = gdal.GDT_Byte
             else:
                 # Default or fallback: Convert to Byte for standard PNG compatibility
                 print(f"Warning: Unsupported data type {dtype} for PNG {os.path.basename(tile_path)}")
-                tile = np.clip(tile, 0, 255).astype(np.uint8) # Example clip and cast
+                tile = np.clip(tile, 0, 255).astype(np.uint8)  # Example clip and cast
                 gdal_dtype = gdal.GDT_Byte
 
             n_bands = tile.shape[0]
@@ -344,7 +345,7 @@ class OrthomosaicTiler:
 
             # Use CreateCopy to save the in-memory dataset as PNG
             png_file_path = f"{tile_path}.png"
-            dst_ds = png_driver.CreateCopy(png_file_path, mem_ds, strict=0) # strict=0 allows for some flexibility
+            dst_ds = png_driver.CreateCopy(png_file_path, mem_ds, strict=0)  # strict=0 allows for some flexibility
 
             if dst_ds is None:
                 raise Exception(f"Failed to create PNG file using CreateCopy: {png_file_path}")
@@ -392,8 +393,8 @@ def main():
     parser.add_argument('--output_format', type=str, choices=['geotiff', 'jpeg', 'png'], default='png',
                         help='Output format of the tiles (default: geotiff)')
 
-    parser.add_argument("--red_dot", action="store_true",
-                        help="Superimpose a red dot on tiles containing points of interest")
+    parser.add_argument("--red_arrow", action="store_true",
+                        help="Superimpose a red arrow on tiles containing points of interest")
 
     parser.add_argument('--csv_path', type=str, default=None,
                         help='Path to the CSV file containing points of interest')
@@ -408,7 +409,7 @@ def main():
                                  output_dir=args.output_dir,
                                  tile_size=args.tile_size,
                                  output_format=args.output_format,
-                                 red_dot=args.red_dot,
+                                 red_arrow=args.red_arrow,
                                  csv_path=args.csv_path,
                                  csv_epsg=args.csv_epsg)
 
