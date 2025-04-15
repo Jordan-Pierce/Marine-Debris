@@ -208,14 +208,18 @@ class OrthomosaicTiler:
 
         image = Image.fromarray(tile)
         draw = ImageDraw.Draw(image)
-        arrow_size = 100
+        arrow_size = 25
+        y_offset = -15
 
         for x, y in points:
+            y += y_offset  # Adjust y position for the arrow
+            
             # Draw a downward-facing arrow
             draw.line([(x, y - arrow_size), (x, y)], fill='red', width=3)  # Arrow shaft
-            draw.polygon([(x - 5, y - arrow_size + 10), 
-                          (x + 5, y - arrow_size + 10), 
-                          (x, y - arrow_size)], fill='red')   # Arrowhead
+            # Inverted arrowhead pointing downward
+            draw.polygon([(x - 5, y - 10), 
+                          (x + 5, y - 10), 
+                          (x, y)], fill='red')   # Arrowhead at bottom of shaft
 
         tile = np.moveaxis(np.array(image), -1, 0)
 
