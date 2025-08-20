@@ -18,7 +18,7 @@ conda activate debris
 # Install the following from conda-forge
 conda install git -y
 
-# Install the folling from pip:
+# Install the following from pip:
 pip install uv
 ```
 
