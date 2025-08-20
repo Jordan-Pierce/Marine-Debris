@@ -380,6 +380,38 @@ def image_contains_points(parsed_data: dict, gdf: gpd.GeoDataFrame) -> bool:
         print(f"Error checking image footprint: {e}")
         return False
     
+    
+def convert_to_image_format(tiff_path, output_format):
+    """
+    Convert a TIFF file to JPG or PNG format.
+    
+    Args:
+        tiff_path: Path to the input TIFF file
+        output_format: Desired output format ('jpg' or 'png')
+    
+    Returns:
+        Path to the converted file
+    """
+    if output_format not in ['jpg', 'png']:
+        return tiff_path
+        
+    output_path = os.path.splitext(tiff_path)[0] + '.' + output_format
+    
+    try:
+        with Image.open(tiff_path) as img:
+            # Convert to RGB if needed (in case it's RGBA)
+            if img.mode in ('RGBA', 'LA'):
+                img = img.convert('RGB')
+            # Save as the desired format
+            img.save(output_path, quality=95 if output_format == 'jpg' else None)
+            
+        # Remove the TIFF file if conversion successful
+        os.remove(tiff_path)
+        return output_path
+    except Exception as e:
+        print(f"Error converting {tiff_path} to {output_format}: {e}")
+        return tiff_path
+    
 
 def process_excel_to_geojson(src_path: str) -> str:
     """
@@ -473,6 +505,12 @@ def main():
         action="store_true",
         default=False
     )
+    parser.add_argument(
+        "--format",
+        help="Output format: tif (default), jpg, or png",
+        choices=['tif', 'jpg', 'png'],
+        default='jpg'
+    )
 
     args = parser.parse_args()
 
@@ -504,7 +542,7 @@ def main():
             return
 
     # Create georeferenced output directory
-    georef_dir = os.path.join(image_dir, os.path.basename(image_dir) + "_georeferenced")
+    georef_dir = os.path.join(image_dir, os.path.basename(image_dir) + "_processed")
     if not os.path.exists(georef_dir):
         os.makedirs(georef_dir)
         print(f"\nCreated output directory: {georef_dir}")
@@ -544,6 +582,11 @@ def main():
                 compress=args.compress,
                 quality=args.quality
             )
+            
+            # Convert to desired format if not TIF
+            if args.format != 'tif':
+                output_path = convert_to_image_format(output_path, args.format)
+                
             processed_count += 1
 
         except Exception as e:
