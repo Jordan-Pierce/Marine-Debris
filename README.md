@@ -44,9 +44,10 @@ uv pip install -e .
 
 ### Usage
 
-For georeferencing images, the following will create "georeferenced" images from the images in the image folder. If 
-you provide a path to the excel file, it will also convert this into a geojson file. You can also compress the file, 
-if you provide the excel file and add the tag for filter, only images that have an annotated point will be saved.
+For georeferencing images, the following will create "georeferenced" images from the images in the image folder; you
+can compress the image files by adding the compress tag. If you provide a path to the excel file, it will also convert 
+this into a geojson file; if you add the filter tag, only images that have an annotated point will be saved.
+
 ```bash
 # cmd
 
