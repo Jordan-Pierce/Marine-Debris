@@ -54,6 +54,9 @@ this into a geojson file; if you add the filter tag, only images that have an an
 python src\georeference_images.py --images path/to/image/folder --excel path/to/excel_file --compress --filter
 ```
 
+Note that the default output `--format` is `jpg`, therefore the output images will not be georeferenced; they will
+however be filtered. Change to `tif` to create georeferenced images (though these cannot be uploaded to Zooniverse.)
+
 ### Notes
 
 `arcpy` is needed to run `tile_Orthomosaic.py`. It is recommended to use the Anaconda environment with ArcGIS Pro 
