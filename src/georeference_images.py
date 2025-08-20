@@ -503,11 +503,17 @@ def main():
             print(f"Error processing Excel file for filtering: {e}")
             return
 
+    # Create georeferenced output directory
+    georef_dir = os.path.join(image_dir, os.path.basename(image_dir) + "_georeferenced")
+    if not os.path.exists(georef_dir):
+        os.makedirs(georef_dir)
+        print(f"\nCreated output directory: {georef_dir}")
+
     # Process each image
     processed_count = 0
     for i_idx, image_file in enumerate(image_files, 1):
         image_path = os.path.join(image_dir, image_file)
-        output_path = ".".join(image_path.split(".")[:-1]) + ".tif"
+        output_path = os.path.join(georef_dir, os.path.splitext(image_file)[0] + ".tif")
         
         print(f"\nProcessing image {i_idx}/{len(image_files)}: {image_file}")
         
