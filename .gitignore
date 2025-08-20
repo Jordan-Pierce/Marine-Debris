@@ -5,4 +5,5 @@
 *.tif
 *.tiff.*
 *.xml
-Data/
+data/
+*.egg-info/
