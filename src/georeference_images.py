@@ -492,7 +492,7 @@ def main():
 
     # Load GeoJSON data if we're filtering and Excel file is provided
     gdf = None
-    if args.filter and args.excel:
+    if args.excel:
         print("\nProcessing Excel file for filtering...")
         excel_dir = os.path.dirname(os.path.abspath(args.excel))
         try:
@@ -551,21 +551,6 @@ def main():
             continue
 
     print(f"\nSuccessfully processed {processed_count} out of {len(image_files)} images.")
-
-    # Process Excel file if provided
-    if args.excel:
-        excel_path = os.path.abspath(args.excel)
-        if not os.path.exists(excel_path):
-            print(f"\nError: Excel file '{excel_path}' does not exist.")
-            return
-        
-        excel_dir = os.path.dirname(excel_path)
-        try:
-            geojson_path = process_excel_to_geojson(excel_dir)
-            print(f"\nSuccessfully processed Excel data to: {geojson_path}")
-        except Exception as e:
-            print(f"\nError processing Excel file: {e}")
-
     print("\nProcessing complete!")
 
 
