@@ -567,6 +567,12 @@ def main():
         choices=['tif', 'jpg', 'png'],
         default='jpg'
     )
+    parser.add_argument(
+        "--recursive",
+        help="Recursively process images in first-level subdirectories",
+        action="store_true",
+        default=False
+    )
 
     parser.add_argument(
         "-o", "--output-dir",
@@ -609,12 +615,28 @@ def main():
         return
 
     # Process images
-    image_files = [f for f in os.listdir(image_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+    image_files = []
+    
+    if args.recursive:
+        print("Recursive mode enabled. Searching first-level subdirectories...")
+        # Get first-level subdirectories
+        subdirs = [d for d in os.listdir(image_dir) if os.path.isdir(os.path.join(image_dir, d))]
+        
+        for subdir in subdirs:
+            subdir_path = os.path.join(image_dir, subdir)
+            sub_images = [(subdir, f) for f in os.listdir(subdir_path) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+            image_files.extend(sub_images)
+            
+        print(f"Found {len(image_files)} images in {len(subdirs)} subdirectories")
+    else:
+        # Regular mode - only process files in the top directory
+        top_images = [(None, f) for f in os.listdir(image_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        image_files = top_images
+        print(f"Found {len(image_files)} images to process...")
+    
     if not image_files:
         print(f"No image files found in {image_dir}")
         return
-
-    print(f"Found {len(image_files)} images to process...")
 
     # Load GeoJSON data if we're filtering and Excel file is provided
     gdf = None
@@ -629,14 +651,19 @@ def main():
             print(f"Error processing Excel file for filtering: {e}")
             return
 
-    # Determine georeferenced output directory
-    if args.output_dir:
-        georef_dir = os.path.abspath(args.output_dir)
+    # Create output directory structure
+    if args.recursive:
+        # For recursive mode, we'll create a parent "_processed" directory
+        georef_parent_dir = os.path.join(os.path.dirname(image_dir), os.path.basename(image_dir) + "_processed")
+        if not os.path.exists(georef_parent_dir):
+            os.makedirs(georef_parent_dir)
+            print(f"\nCreated parent output directory: {georef_parent_dir}")
     else:
-        georef_dir = os.path.join(image_dir, os.path.basename(image_dir) + "_processed")
-    if not os.path.exists(georef_dir):
-        os.makedirs(georef_dir)
-        print(f"\nCreated output directory: {georef_dir}")
+        # For regular mode, just create a single output directory
+        georef_parent_dir = os.path.join(image_dir, os.path.basename(image_dir) + "_processed")
+        if not os.path.exists(georef_parent_dir):
+            os.makedirs(georef_parent_dir)
+            print(f"\nCreated output directory: {georef_parent_dir}")
 
     # Process each image
     processed_count = 0
@@ -654,7 +681,7 @@ def main():
         # Parse the metadata
         parsed_metadata = parse_image(image_path)
         if parsed_metadata is None:
-            print(f"Failed to parse metadata for {image_file}. Skipping...")
+            print(f"Failed to parse metadata for {img_display_name}. Skipping...")
             continue
 
         # Check if image contains points when filtering is enabled
@@ -690,7 +717,7 @@ def main():
             processed_count += 1
 
         except Exception as e:
-            print(f"Error processing {image_file}: {str(e)}")
+            print(f"Error processing {img_display_name}: {str(e)}")
             continue
 
     print(f"\nSuccessfully processed {processed_count} out of {len(image_files)} images.")
