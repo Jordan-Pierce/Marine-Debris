@@ -573,7 +573,6 @@ def main():
         action="store_true",
         default=False
     )
-
     parser.add_argument(
         "-o", "--output-dir",
         help="Optional output directory for processed images. "
@@ -591,19 +590,19 @@ def main():
         "--graphic_radius",
         help="Radius (in pixels) of the superimposed graphic (default: 10)",
         type=int,
-        default=10
+        default=500
     )
     parser.add_argument(
         "--graphic_pen_width",
         help="Pen width (in pixels) for the graphic border (default: 2)",
         type=int,
-        default=2
+        default=5
     )
     parser.add_argument(
         "--graphic_color",
         help="Color of the graphic border (default: black)",
         type=str,
-        default="black"
+        default="red"
     )
 
     args = parser.parse_args()
@@ -668,11 +667,24 @@ def main():
     # Process each image
     processed_count = 0
 
-    for i_idx, image_file in enumerate(image_files, 1):
-        image_path = os.path.join(image_dir, image_file)
-        output_path = os.path.join(georef_dir, os.path.splitext(image_file)[0] + ".tif")
+    for i_idx, image_info in enumerate(image_files, 1):
+        # image_info is (subdir, filename) for recursive, (None, filename) for non-recursive
+        if args.recursive:
+            subdir, image_file = image_info
+            image_path = os.path.join(image_dir, subdir, image_file)
+            # Output to a subdirectory in georef_parent_dir
+            output_subdir = os.path.join(georef_parent_dir, subdir)
+            if not os.path.exists(output_subdir):
+                os.makedirs(output_subdir)
+            output_path = os.path.join(output_subdir, os.path.splitext(image_file)[0] + ".tif")
+            img_display_name = f"{subdir}/{image_file}"
+        else:
+            _, image_file = image_info
+            image_path = os.path.join(image_dir, image_file)
+            output_path = os.path.join(georef_parent_dir, os.path.splitext(image_file)[0] + ".tif")
+            img_display_name = image_file
 
-        print(f"\nProcessing image {i_idx}/{len(image_files)}: {image_file}")
+        print(f"\nProcessing image {i_idx}/{len(image_files)}: {img_display_name}")
 
         if os.path.exists(output_path):
             print(f"File {output_path} already exists. Skipping...")
