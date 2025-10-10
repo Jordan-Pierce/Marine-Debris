@@ -439,9 +439,9 @@ def image_contains_points(parsed_data: dict, gdf: gpd.GeoDataFrame) -> bool:
         return False
     
     
-def convert_to_image_format(tiff_path, output_format, quality=100):  # Changed default to 100 for no extra compression
+def convert_to_image_format(tiff_path, output_format, quality=100):
     """
-    Convert a TIFF file to JPG, PNG, or WebP format without additional compression.
+    Convert a TIFF file to JPG, PNG, or WebP format with compression.
     
     Args:
         tiff_path: Path to the input TIFF file
@@ -550,16 +550,10 @@ def main():
         required=False
     )
     parser.add_argument(
-        "--compress",
-        help="Enable TIFF compression (default: True)",
-        action="store_true",
-        default=True
-    )
-    parser.add_argument(
         "--quality",
         help="JPEG compression quality (1-100, default: 85)",
         type=int,
-        default=85
+        default=25
     )
     parser.add_argument(
         "--filter",
@@ -724,8 +718,6 @@ def main():
                 parsed_metadata,
                 image_path,
                 output_path,
-                compress=args.compress,
-                quality=args.quality
             )
 
             # Convert to desired format if not TIF
