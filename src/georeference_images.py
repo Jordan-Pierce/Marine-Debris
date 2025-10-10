@@ -223,6 +223,9 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=True
 
             # Read the source image's bands and metadata
             src_data = src.read()
+            # Only keep the first 3 bands (RGB)
+            if src_data.shape[0] > 3:
+                src_data = src_data[:3]
 
             # If drawing graphics, do it here on the image data
             if draw_graphic and gdf is not None:
@@ -277,7 +280,7 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=True
                 'driver': 'GTiff',
                 'height': img_height,
                 'width': img_width,
-                'count': src.count,      # Number of bands (e.g., 3 for RGB)
+                'count': 3,  # Only 3 bands (RGB)
                 'dtype': src.dtypes[0],  # Data type (e.g., uint8)
                 'crs': crs_epsg,
                 'transform': transform,
