@@ -111,7 +111,7 @@ def dms_to_dd(dms_str, ref):
         return None
 
 
-def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=True, quality=85):
+def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=False, quality=100):
     """
     Creates a georeferenced TIFF from a JPG using its parsed EXIF metadata.
     Optionally draws graphics (circles) for points in gdf if provided.
@@ -439,33 +439,36 @@ def image_contains_points(parsed_data: dict, gdf: gpd.GeoDataFrame) -> bool:
         return False
     
     
-def convert_to_image_format(tiff_path, output_format):
+def convert_to_image_format(tiff_path, output_format, quality=100):  # Changed default to 100 for no extra compression
     """
-    Convert a TIFF file to JPG or PNG format.
+    Convert a TIFF file to JPG, PNG, or WebP format without additional compression.
     
     Args:
         tiff_path: Path to the input TIFF file
-        output_format: Desired output format ('jpg' or 'png')
-    
-    Returns:
-        Path to the converted file
+        output_format: Desired output format ('jpg', 'jpeg', 'png', 'webp')
+        quality: Compression quality (set to 100 for lossless conversion; ignored for PNG)
     """
-    if output_format not in ['jpg', 'png']:
+    if output_format not in ['jpg', 'jpeg', 'png', 'webp']:
         return tiff_path
         
     output_path = os.path.splitext(tiff_path)[0] + '.' + output_format
     
     try:
         with Image.open(tiff_path) as img:
-            # Convert to RGB if needed (in case it's RGBA)
+            # Convert to RGB if needed
             if img.mode in ('RGBA', 'LA'):
                 img = img.convert('RGB')
-            # Save as the desired format
-            img.save(output_path, quality=95 if output_format == 'jpg' else None)
-            
-        # Remove the TIFF file if conversion successful
-        os.remove(tiff_path)
-        return output_path
+                
+            # Save with quality=100 to avoid extra compression (lossless for JPG/WebP)
+            img.save(
+                output_path, 
+                quality=quality,  # Now defaults to 100
+                exif=b''  # Strips all metadata
+            )
+
+            # Remove the intermediate TIFF file
+            os.remove(tiff_path)
+            return output_path
     except Exception as e:
         print(f"Error converting {tiff_path} to {output_format}: {e}")
         return tiff_path
@@ -567,7 +570,7 @@ def main():
     parser.add_argument(
         "--format",
         help="Output format: tif (default), jpg, or png",
-        choices=['tif', 'jpg', 'png'],
+        choices=['tif', 'jpg', 'jpeg', 'png', 'webp'],
         default='jpg'
     )
     parser.add_argument(
@@ -727,7 +730,7 @@ def main():
 
             # Convert to desired format if not TIF
             if args.format != 'tif':
-                output_path = convert_to_image_format(output_path, args.format)
+                output_path = convert_to_image_format(output_path, args.format, args.quality)
 
             processed_count += 1
 
