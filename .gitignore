@@ -7,3 +7,4 @@
 *.xml
 data/
 *.egg-info/
+.vscode/

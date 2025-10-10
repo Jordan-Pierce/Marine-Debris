@@ -114,7 +114,14 @@ def dms_to_dd(dms_str, ref):
 def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=True, quality=85):
     """
     Creates a georeferenced TIFF from a JPG using its parsed EXIF metadata.
+    Optionally draws graphics (circles) for points in gdf if provided.
     """
+    # Optional arguments for graphics
+    gdf = parsed_data.get('_gdf', None)
+    draw_graphic = parsed_data.get('_draw_graphic', False)
+    graphic_radius = parsed_data.get('_graphic_radius', 10)
+    graphic_pen_width = parsed_data.get('_graphic_pen_width', 2)
+    graphic_color = parsed_data.get('_graphic_color', 'black')
     # --- Step A: Prepare data from the parsed dictionary ---
     try:
         # Image dimensions
@@ -213,10 +220,58 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=True
             # Get the CRS for the UTM zone
             # Northern Hemisphere: 326xx, Southern Hemisphere: 327xx
             crs_epsg = f"EPSG:326{zone_num}" if lat_dd >= 0 else f"EPSG:327{zone_num}"
-            
+
             # Read the source image's bands and metadata
             src_data = src.read()
-            
+
+            # If drawing graphics, do it here on the image data
+            if draw_graphic and gdf is not None:
+                try:
+                    # Convert src_data to PIL Image for drawing
+                    arr = np.moveaxis(src_data[:3], 0, -1)  # (height, width, bands)
+                    im = Image.fromarray(arr)
+                    from PIL import ImageDraw
+                    from shapely.geometry import Point as ShapelyPoint
+                    from shapely.ops import unary_union
+                    # Collect all circle polygons in pixel coordinates
+                    circle_polys = []
+                    for idx, row in gdf.iterrows():
+                        pt_lon = row['Longitude']
+                        pt_lat = row['Latitude']
+                        pt_x, pt_y, pt_zone, pt_letter = utm.from_latlon(pt_lat, pt_lon)
+                        if pt_zone != zone_num:
+                            continue
+                        if not (
+                            cam_x - half_w <= pt_x <= cam_x + half_w
+                            and cam_y - half_h <= pt_y <= cam_y + half_h
+                        ):
+                            continue
+                        px = (pt_x - (cam_x - half_w)) / ground_width_m * img_width
+                        py = (cam_y + half_h - pt_y) / ground_height_m * img_height
+                        # Create a Shapely circle in pixel coordinates
+                        circle = ShapelyPoint(px, py).buffer(graphic_radius, resolution=32)
+                        circle_polys.append(circle)
+                    if circle_polys:
+                        # Union all circles to get the outer perimeter
+                        union_poly = unary_union(circle_polys)
+                        draw = ImageDraw.Draw(im)
+                        # Draw only the exterior(s) of the union polygon(s)
+                        
+                        def draw_exterior(poly):
+                            if poly.is_empty:
+                                return
+                            if poly.geom_type == 'Polygon':
+                                exterior = [(x, y) for x, y in poly.exterior.coords]
+                                draw.line(exterior, fill=graphic_color, width=graphic_pen_width, joint="curve")
+                            elif poly.geom_type == 'MultiPolygon':
+                                for p in poly.geoms:
+                                    draw_exterior(p)
+                        draw_exterior(union_poly)
+                    arr2 = np.array(im)
+                    src_data[:3] = np.moveaxis(arr2, -1, 0)
+                except Exception as e:
+                    print(f"Error drawing graphics in create_geotiff: {e}")
+
             # Build the output profile from scratch
             profile = {
                 'driver': 'GTiff',
@@ -233,7 +288,7 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=True
                 if quality < 100:
                     profile['compress'] = 'jpeg'
                     profile['jpeg_quality'] = quality
-                    profile['photometric'] = 'YCBCR' # Recommended for JPEG compression
+                    profile['photometric'] = 'YCBCR'  # Recommended for JPEG compression
                 else:
                     # Use a good lossless compression
                     profile['compress'] = 'lzw'
@@ -241,8 +296,8 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=True
             # Write the new GeoTIFF file
             with rasterio.open(output_tiff_path, 'w', **profile) as dst:
                 dst.write(src_data)
-        
-        print(f"✅ Successfully created georeferenced file: {output_tiff_path}")
+
+        print(f"✅ Successfully created georeferenced file: {output_tiff_path.split('.')[0]}")
 
     except Exception as e:
         print(f"Error writing GeoTIFF: {e}")
@@ -472,6 +527,7 @@ def process_excel_to_geojson(src_path: str) -> str:
 
 
 def main():
+
     parser = argparse.ArgumentParser(
         description="Georeference drone images and optionally process accompanying Excel data."
     )
@@ -512,6 +568,38 @@ def main():
         default='jpg'
     )
 
+    parser.add_argument(
+        "-o", "--output-dir",
+        help="Optional output directory for processed images. "
+             "If not provided, defaults to <images>_processed in the image directory.",
+        type=str,
+        required=False
+    )
+    parser.add_argument(
+        "--draw_graphic",
+        help="If set, superimpose a black circle on each point in the output images.",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--graphic_radius",
+        help="Radius (in pixels) of the superimposed graphic (default: 10)",
+        type=int,
+        default=10
+    )
+    parser.add_argument(
+        "--graphic_pen_width",
+        help="Pen width (in pixels) for the graphic border (default: 2)",
+        type=int,
+        default=2
+    )
+    parser.add_argument(
+        "--graphic_color",
+        help="Color of the graphic border (default: black)",
+        type=str,
+        default="black"
+    )
+
     args = parser.parse_args()
 
     # Convert relative paths to absolute
@@ -541,24 +629,28 @@ def main():
             print(f"Error processing Excel file for filtering: {e}")
             return
 
-    # Create georeferenced output directory
-    georef_dir = os.path.join(image_dir, os.path.basename(image_dir) + "_processed")
+    # Determine georeferenced output directory
+    if args.output_dir:
+        georef_dir = os.path.abspath(args.output_dir)
+    else:
+        georef_dir = os.path.join(image_dir, os.path.basename(image_dir) + "_processed")
     if not os.path.exists(georef_dir):
         os.makedirs(georef_dir)
         print(f"\nCreated output directory: {georef_dir}")
 
     # Process each image
     processed_count = 0
+
     for i_idx, image_file in enumerate(image_files, 1):
         image_path = os.path.join(image_dir, image_file)
         output_path = os.path.join(georef_dir, os.path.splitext(image_file)[0] + ".tif")
-        
+
         print(f"\nProcessing image {i_idx}/{len(image_files)}: {image_file}")
-        
+
         if os.path.exists(output_path):
             print(f"File {output_path} already exists. Skipping...")
             continue
-        
+
         # Parse the metadata
         parsed_metadata = parse_image(image_path)
         if parsed_metadata is None:
@@ -574,7 +666,15 @@ def main():
                 print("Image contains points from Excel data. Processing...")
 
         try:
-            # Create georeferenced TIFF
+
+            # Pass graphics arguments via parsed_metadata for create_geotiff
+            parsed_metadata['_gdf'] = gdf
+            parsed_metadata['_draw_graphic'] = args.draw_graphic
+            parsed_metadata['_graphic_radius'] = args.graphic_radius
+            parsed_metadata['_graphic_pen_width'] = args.graphic_pen_width
+            parsed_metadata['_graphic_color'] = args.graphic_color
+
+            # Create georeferenced TIFF (with graphics if requested)
             create_geotiff(
                 parsed_metadata,
                 image_path,
@@ -582,11 +682,11 @@ def main():
                 compress=args.compress,
                 quality=args.quality
             )
-            
+
             # Convert to desired format if not TIF
             if args.format != 'tif':
                 output_path = convert_to_image_format(output_path, args.format)
-                
+
             processed_count += 1
 
         except Exception as e:
