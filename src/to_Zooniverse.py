@@ -3,6 +3,7 @@ import glob
 import argparse
 from tqdm import tqdm
 import panoptes_client
+from datetime import datetime
 
 import pandas as pd
 
@@ -13,7 +14,7 @@ import pandas as pd
 
 
 class ZooniverseUploader:
-    def __init__(self, username, password, zoon_project_id, input_dir, set_active, upload, output_dir, file_extension):
+    def __init__(self, username, password, zoon_project_id, input_dir, set_active, upload, file_extension):
         """
 
         :param username:
@@ -22,7 +23,6 @@ class ZooniverseUploader:
         :param input_dir:
         :param set_active:
         :param upload:
-        :param output_dir:
         :param file_extension:
         """
         self.username = username
@@ -31,7 +31,6 @@ class ZooniverseUploader:
         self.input_dir = input_dir
         self.set_active = set_active
         self.upload = upload
-        self.output_dir = output_dir.replace("\\", "/")
         self.file_extension = file_extension.lstrip('.')
         self.client = None
         self.project = None
@@ -107,7 +106,8 @@ class ZooniverseUploader:
                 self.set_active_workflows(subject_set)
 
             self.dataframe['Subject_ID'] = subject_ids
-            self.dataframe.to_csv(f"{self.input_dir}/frames.csv", index=False)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.dataframe.to_csv(f"{self.input_dir}/{timestamp}_frames.csv", index=False)
 
         except Exception as e:
             raise Exception(f"ERROR: Could not finish uploading subject set. {str(e)}")
@@ -140,8 +140,6 @@ class ZooniverseUploader:
         print("\n###############################################")
         print("Upload to Zooniverse")
         print("###############################################\n")
-
-        os.makedirs(self.output_dir, exist_ok=True)
 
         self.connect_to_zooniverse()
         self.prepare_dataframe()
@@ -181,13 +179,7 @@ def main():
     parser.add_argument("--upload", action='store_true',
                         help="Upload media to Zooniverse (debugging)")
 
-    parser.add_argument("--output_dir", type=str,
-                        help="Path to the output directory. Defaults to 'uploaded' inside input_dir.")
-
     args = parser.parse_args()
-
-    if args.output_dir is None:
-        args.output_dir = os.path.join(args.input_dir, 'uploaded')
 
     try:
         uploader = ZooniverseUploader(
@@ -197,7 +189,6 @@ def main():
             input_dir=args.input_dir,
             set_active=args.set_active,
             upload=args.upload,
-            output_dir=args.output_dir,
             file_extension=args.file_extension
         )
         uploader.run()
