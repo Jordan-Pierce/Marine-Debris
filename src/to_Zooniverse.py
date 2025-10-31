@@ -11,8 +11,9 @@ import pandas as pd
 # Classes
 # ----------------------------------------------------------------------------------------------------------------------
 
+
 class ZooniverseUploader:
-    def __init__(self, username, password, zoon_project_id, input_dir, set_active, upload, output_dir):
+    def __init__(self, username, password, zoon_project_id, input_dir, set_active, upload, output_dir, file_extension):
         """
 
         :param username:
@@ -22,6 +23,7 @@ class ZooniverseUploader:
         :param set_active:
         :param upload:
         :param output_dir:
+        :param file_extension:
         """
         self.username = username
         self.password = password
@@ -30,6 +32,7 @@ class ZooniverseUploader:
         self.set_active = set_active
         self.upload = upload
         self.output_dir = output_dir.replace("\\", "/")
+        self.file_extension = file_extension.lstrip('.')
         self.client = None
         self.project = None
         self.dataframe = None
@@ -56,20 +59,14 @@ class ZooniverseUploader:
 
         :return:
         """
-        tile_paths = glob.glob(f"{self.input_dir}/*.jpeg")[0:20]
+        file_paths = glob.glob(f"{self.input_dir}/*.{self.file_extension}")
         data = []
 
-        for tile_path in tile_paths:
-            mosaic_name = os.path.basename(tile_path).split("---")[0]
-            tile_name = os.path.basename(tile_path)
-            tile_id = tile_name.split("---")[-1].split(".")[0]
+        for file_path in file_paths:
+            file_name = os.path.splitext(os.path.basename(file_path))[0]
+            data.append([file_name, file_path])
 
-            data.append([mosaic_name, tile_name, tile_id, tile_path])
-
-        self.dataframe = pd.DataFrame(data, columns=['Mosaic Name',
-                                                     'Tile Name',
-                                                     'Tile ID',
-                                                     'Path'])
+        self.dataframe = pd.DataFrame(data, columns=['Filename', 'Path'])
 
     def upload_to_zooniverse(self):
         """
@@ -82,7 +79,7 @@ class ZooniverseUploader:
         try:
             subject_set = panoptes_client.SubjectSet()
             subject_set.links.project = self.project
-            subject_set.display_name = str(self.dataframe['Mosaic Name'].iloc[0])
+            subject_set.display_name = str(self.dataframe['Filename'].iloc[0])
             subject_set.save()
 
             self.project.reload()
@@ -173,7 +170,10 @@ def main():
                         help="Zooniverse project ID")
 
     parser.add_argument("--input_dir", type=str,
-                        help="Path to directory containing tiles")
+                        help="Path to directory containing images")
+
+    parser.add_argument("--file_extension", type=str, default="jpg",
+                        help="File extension of the images (without leading dot)")
 
     parser.add_argument("--set_active", action='store_true',
                         help="Make subject-set active with current workflow")
@@ -182,10 +182,12 @@ def main():
                         help="Upload media to Zooniverse (debugging)")
 
     parser.add_argument("--output_dir", type=str,
-                        default=f'{os.path.dirname(os.path.dirname(os.path.realpath(__file__)))}/Data',
-                        help="Path to the output directory.")
+                        help="Path to the output directory. Defaults to 'uploaded' inside input_dir.")
 
     args = parser.parse_args()
+
+    if args.output_dir is None:
+        args.output_dir = os.path.join(args.input_dir, 'uploaded')
 
     try:
         uploader = ZooniverseUploader(
@@ -195,7 +197,8 @@ def main():
             input_dir=args.input_dir,
             set_active=args.set_active,
             upload=args.upload,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            file_extension=args.file_extension
         )
         uploader.run()
     except Exception as e:
