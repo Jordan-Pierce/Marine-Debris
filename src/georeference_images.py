@@ -21,6 +21,55 @@ from PIL import Image
 # --------------------------------------------------------------------------------------------------------------
 
 
+def parse_xmp_data(image_path: str) -> dict:
+    """
+    Reads the raw image file and uses regex to extract gimbal data 
+    from the XMP metadata block (which is stored as XML text).
+    
+    Args:
+        image_path: The full path to the image file.
+
+    Returns:
+        A dictionary with gimbal data if found, otherwise None.
+    """
+    try:
+        # Read the file in binary mode
+        with open(image_path, 'rb') as f:
+            # Read a chunk of the file (metadata is near the start)
+            # Reading 100KB should be more than enough for XMP
+            content = f.read(100 * 1024).decode('utf-8', errors='ignore')
+
+        # Regex patterns for the two common XMP formats
+        # Format 1: <drone-dji:GimbalYawDegree>123.4</drone-dji:GimbalYawDegree>
+        pattern_tag = r'<drone-dji:Gimbal(Yaw|Pitch|Roll)Degree>([^<]+)</drone-dji:Gimbal\1Degree>'
+        
+        # Format 2: drone-dji:GimbalYawDegree="123.4"
+        pattern_attr = r'drone-dji:Gimbal(Yaw|Pitch|Roll)Degree="([^"]+)"'
+
+        gimbal_data = {}
+        matches = re.findall(pattern_tag, content) + re.findall(pattern_attr, content)
+
+        if not matches:
+            # print(f"No drone-dji XMP gimbal tags found in {os.path.basename(image_path)}")
+            return None
+
+        for key, value in matches:
+            full_key = f"Gimbal {key} Degree"
+            if full_key not in gimbal_data:  # Keep the first one found
+                gimbal_data[full_key] = value
+                
+        # Check if we got all three
+        if all(k in gimbal_data for k in ["Gimbal Yaw Degree", "Gimbal Pitch Degree", "Gimbal Roll Degree"]):
+            return gimbal_data
+        else:
+            # print(f"Found partial XMP data in {os.path.basename(image_path)}: {gimbal_data}")
+            return gimbal_data  # Return partial data if that's all we have
+
+    except Exception as e:
+        print(f"Error reading XMP data from {image_path}: {str(e)}")
+        return None
+    
+
 def parse_image(image_path: str) -> dict:
     """
     Extract metadata from an image using the exif library.
@@ -60,7 +109,10 @@ def parse_image(image_path: str) -> dict:
                 parsed_data["Focal Length In 35mm Format"] = f"{img.focal_length_in_35mm_film:.1f}"
             
             # GPS data
-            if all(hasattr(img, attr) for attr in ['gps_latitude', 'gps_latitude_ref', 'gps_longitude', 'gps_longitude_ref']):
+            if all(hasattr(img, attr) for attr in ['gps_latitude',
+                                                   'gps_latitude_ref',
+                                                   'gps_longitude',
+                                                   'gps_longitude_ref']):
                 # Format GPS coordinates
                 lat_str = f"{int(img.gps_latitude[0])} deg {int(img.gps_latitude[1])}' {img.gps_latitude[2]:.2f}\" {img.gps_latitude_ref}"
                 lon_str = f"{int(img.gps_longitude[0])} deg {int(img.gps_longitude[1])}' {img.gps_longitude[2]:.2f}\" {img.gps_longitude_ref}"
@@ -79,11 +131,21 @@ def parse_image(image_path: str) -> dict:
             # Using a typical value for DJI drones if not calculable
             parsed_data["Field Of View"] = "75.0"
             
-            # Gimbal orientation - using default values for nadir view
-            # These are typically stored in XMP metadata which exif library doesn't support
-            parsed_data["Gimbal Roll Degree"] = "0.0"
-            parsed_data["Gimbal Yaw Degree"] = "0.0"
-            parsed_data["Gimbal Pitch Degree"] = "-90.0"  # Assuming nadir (downward) view
+            # --- Gimbal Orientation ---
+            # Try to get from XMP data first
+            xmp_gimbal_data = parse_xmp_data(image_path)
+            
+            if xmp_gimbal_data:
+                # Use XMP data if available, falling back to default for any missing tags
+                parsed_data["Gimbal Roll Degree"] = xmp_gimbal_data.get("Gimbal Roll Degree", "0.0")
+                parsed_data["Gimbal Yaw Degree"] = xmp_gimbal_data.get("Gimbal Yaw Degree", "0.0")
+                parsed_data["Gimbal Pitch Degree"] = xmp_gimbal_data.get("Gimbal Pitch Degree", "-90.0")
+            else:
+                # Fallback to default values for nadir view if XMP fails
+                # print(f"XMP gimbal data not found for {parsed_data['File Name']}. Using defaults.")
+                parsed_data["Gimbal Roll Degree"] = "0.0"
+                parsed_data["Gimbal Yaw Degree"] = "0.0"
+                parsed_data["Gimbal Pitch Degree"] = "-90.0"  # Assuming nadir (downward) view
 
     except Exception as e:
         print(f"Error reading EXIF data from {image_path}: {str(e)}")
@@ -233,9 +295,75 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=Fals
                     # Convert src_data to PIL Image for drawing
                     arr = np.moveaxis(src_data[:3], 0, -1)  # (height, width, bands)
                     im = Image.fromarray(arr)
-                    from PIL import ImageDraw
+                    from PIL import ImageDraw, ImageFont
                     from shapely.geometry import Point as ShapelyPoint
                     from shapely.ops import unary_union
+                    import math
+                    
+                    draw = ImageDraw.Draw(im)
+                    
+                    # Draw heading arrow in top-left corner
+                    arrow_center_x = 80
+                    arrow_center_y = 80
+                    arrow_length = 50
+                    
+                    # Convert yaw from degrees to radians (0° = North, clockwise positive)
+                    # Adjust for image coordinate system where 0° points right
+                    yaw_rad = math.radians(yaw_deg - 90)  # Subtract 90° to make 0° point up (North)
+                    
+                    # Calculate arrow end point
+                    end_x = arrow_center_x + arrow_length * math.cos(yaw_rad)
+                    end_y = arrow_center_y + arrow_length * math.sin(yaw_rad)
+                    
+                    # Draw arrow shaft
+                    draw.line([(arrow_center_x, arrow_center_y), (end_x, end_y)], 
+                              fill='red', width=4)
+                    
+                    # Draw arrowhead
+                    arrowhead_length = 15
+                    arrowhead_angle = math.radians(30)  # 30 degrees on each side
+                    
+                    # Calculate arrowhead points
+                    left_x = end_x - arrowhead_length * math.cos(yaw_rad - arrowhead_angle)
+                    left_y = end_y - arrowhead_length * math.sin(yaw_rad - arrowhead_angle)
+                    right_x = end_x - arrowhead_length * math.cos(yaw_rad + arrowhead_angle)
+                    right_y = end_y - arrowhead_length * math.sin(yaw_rad + arrowhead_angle)
+                    
+                    # Draw arrowhead lines
+                    draw.line([(end_x, end_y), (left_x, left_y)], fill='red', width=4)
+                    draw.line([(end_x, end_y), (right_x, right_y)], fill='red', width=4)
+                    
+                    # Draw heading text
+                    heading_text = f"Heading: {yaw_deg:.1f}°"
+                    try:
+                        # Try to use a default font
+                        font = ImageFont.truetype("arial.ttf", 24)
+                    except (OSError, IOError):
+                        # Fall back to default font if arial not available
+                        font = ImageFont.load_default()
+                    
+                    # Draw text with background for better visibility
+                    text_x = 20
+                    text_y = 140
+                    
+                    # Get text bounding box
+                    bbox = draw.textbbox((text_x, text_y), heading_text, font=font)
+                    
+                    # Draw semi-transparent background rectangle
+                    padding = 5
+                    bg_coords = [bbox[0] - padding, bbox[1] - padding, 
+                                 bbox[2] + padding, bbox[3] + padding]
+                    draw.rectangle(bg_coords, fill=(0, 0, 0, 128))  # Semi-transparent black
+                    
+                    # Draw the text
+                    draw.text((text_x, text_y), heading_text, fill='white', font=font)
+                    
+                    # Draw North arrow/compass reference
+                    compass_x = 20
+                    compass_y = 50
+                    draw.text((compass_x, compass_y), "N", fill='white', font=font)
+                    
+                    # Now draw the debris points if any
                     # Collect all circle polygons in pixel coordinates
                     circle_polys = []
                     for idx, row in gdf.iterrows():
@@ -244,10 +372,9 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=Fals
                         pt_x, pt_y, pt_zone, pt_letter = utm.from_latlon(pt_lat, pt_lon)
                         if pt_zone != zone_num:
                             continue
-                        if not (
-                            cam_x - half_w <= pt_x <= cam_x + half_w
-                            and cam_y - half_h <= pt_y <= cam_y + half_h
-                        ):
+                        x_in_bounds = cam_x - half_w <= pt_x <= cam_x + half_w
+                        y_in_bounds = cam_y - half_h <= pt_y <= cam_y + half_h
+                        if not (x_in_bounds and y_in_bounds):
                             continue
                         px = (pt_x - (cam_x - half_w)) / ground_width_m * img_width
                         py = (cam_y + half_h - pt_y) / ground_height_m * img_height
@@ -257,7 +384,6 @@ def create_geotiff(parsed_data, source_jpg_path, output_tiff_path, compress=Fals
                     if circle_polys:
                         # Union all circles to get the outer perimeter
                         union_poly = unary_union(circle_polys)
-                        draw = ImageDraw.Draw(im)
                         # Draw only the exterior(s) of the union polygon(s)
                         
                         def draw_exterior(poly):
